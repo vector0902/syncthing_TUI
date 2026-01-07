@@ -212,7 +212,7 @@ func parseConfigFromHome(homeDir string) (string, string, error) {
 	return syncthingURL, config.GUI.APIKey, nil
 }
 
-func NewModel() model {
+func NewModel(homeDir string) model {
 	var dump *os.File
 	if _, ok := os.LookupEnv("DEBUG"); ok {
 		var err error
@@ -227,13 +227,23 @@ func NewModel() model {
 	envUrl, hasUrlEnv := os.LookupEnv("SYNCTHING_URL")
 	sthome, hasStHome := os.LookupEnv("STHOME")
 
-	// If SYNCTHING_URL and SYNCTHING_API_KEY are not set, try to parse from STHOME
-	if !hasUrlEnv && syncthingApiKey == "" && hasStHome {
-		parsedUrl, parsedKey, err := parseConfigFromHome(sthome)
-		if err == nil {
-			envUrl = parsedUrl
-			syncthingApiKey = parsedKey
-			hasUrlEnv = true
+	// If SYNCTHING_URL and SYNCTHING_API_KEY are not set, try to parse from homeDir (CLI arg) or STHOME
+	if !hasUrlEnv && syncthingApiKey == "" {
+		// First try CLI arg --home, then fall back to STHOME env var
+		if homeDir != "" {
+			parsedUrl, parsedKey, err := parseConfigFromHome(homeDir)
+			if err == nil {
+				envUrl = parsedUrl
+				syncthingApiKey = parsedKey
+				hasUrlEnv = true
+			}
+		} else if hasStHome {
+			parsedUrl, parsedKey, err := parseConfigFromHome(sthome)
+			if err == nil {
+				envUrl = parsedUrl
+				syncthingApiKey = parsedKey
+				hasUrlEnv = true
+			}
 		}
 		// If parsing fails, we'll continue with defaults or other env vars
 	}

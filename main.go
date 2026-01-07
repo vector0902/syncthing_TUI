@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
@@ -10,8 +11,11 @@ import (
 )
 
 func main() {
+	homeDir := flag.String("home", "", "Syncthing home directory path (alternative to STHOME env var)")
+	flag.Parse()
+
 	zone.NewGlobal()
-	p := tea.NewProgram(app.NewModel(), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(app.NewModel(*homeDir), tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	if _, err := p.Run(); err != nil {
 		fmt.Println(err)
