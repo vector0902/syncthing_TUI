@@ -2,13 +2,16 @@ package app
 
 import (
 	"crypto/tls"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -162,6 +165,53 @@ var quitKeys = key.NewBinding(
 	key.WithHelp("", "press q to quit"),
 )
 
+// XMLConfig represents the structure of Syncthing's config.xml file
+type XMLConfig struct {
+	XMLName xml.Name `xml:"configuration"`
+	GUI     struct {
+		Enabled bool   `xml:"enabled,attr"`
+		Address string `xml:"address"`
+		APIKey  string `xml:"apikey"`
+	} `xml:"gui"`
+}
+
+// parseConfigFromHome reads and parses the Syncthing config.xml file from STHOME directory
+// Returns the parsed URL and API key, or an error if parsing fails
+func parseConfigFromHome(homeDir string) (string, string, error) {
+	configPath := filepath.Join(homeDir, "config.xml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to read config file: %w", err)
+	}
+
+	var config XMLConfig
+	if err := xml.Unmarshal(data, &config); err != nil {
+		return "", "", fmt.Errorf("failed to parse config XML: %w", err)
+	}
+
+	// Extract port from address field
+	// Address may be "127.0.0.1:8666" or "0.0.0.0:8666" or just "8666"
+	port := ""
+	parts := strings.Split(config.GUI.Address, ":")
+	if len(parts) == 2 {
+		port = parts[1]
+	} else if len(parts) == 1 {
+		// Try to parse as port number directly
+		if _, err := strconv.Atoi(parts[0]); err == nil {
+			port = parts[0]
+		}
+	}
+
+	if port == "" {
+		return "", "", fmt.Errorf("could not extract port from address: %s", config.GUI.Address)
+	}
+
+	// Construct URL as http://127.0.0.1:port
+	syncthingURL := fmt.Sprintf("http://127.0.0.1:%s", port)
+
+	return syncthingURL, config.GUI.APIKey, nil
+}
+
 func NewModel() model {
 	var dump *os.File
 	if _, ok := os.LookupEnv("DEBUG"); ok {
@@ -171,11 +221,28 @@ func NewModel() model {
 			os.Exit(1)
 		}
 	}
+
+	// Check for environment variables
 	syncthingApiKey := os.Getenv("SYNCTHING_API_KEY")
-	envUrl, hasEnv := os.LookupEnv("SYNCTHING_URL")
-	if !hasEnv {
+	envUrl, hasUrlEnv := os.LookupEnv("SYNCTHING_URL")
+	sthome, hasStHome := os.LookupEnv("STHOME")
+
+	// If SYNCTHING_URL and SYNCTHING_API_KEY are not set, try to parse from STHOME
+	if !hasUrlEnv && syncthingApiKey == "" && hasStHome {
+		parsedUrl, parsedKey, err := parseConfigFromHome(sthome)
+		if err == nil {
+			envUrl = parsedUrl
+			syncthingApiKey = parsedKey
+			hasUrlEnv = true
+		}
+		// If parsing fails, we'll continue with defaults or other env vars
+	}
+
+	// Set default URL if not provided
+	if !hasUrlEnv {
 		envUrl = DEFAULT_SYNCTHING_URL
 	}
+
 	syncthingURL, err := url.Parse(envUrl)
 	if err != nil {
 		err = fmt.Errorf("invalid syncthing host: %w", err)
